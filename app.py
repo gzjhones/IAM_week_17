@@ -36,7 +36,7 @@ KEYWORD_MAP = {
     "tienes": "menu",
     "platos": "recetas",
     "comida": "recetas",
-    "carta": "recetas"
+    "carta": "recetas",
 }
 
 print("--- LOADING BRAIN ---")
@@ -181,28 +181,34 @@ def chat():
     
     context = search_context(user_msg)
     
+    # MODIFICACIÓN AQUÍ: Instrucciones estrictas de formato Markdown
     if context:
-        system_instruction = f"""Eres un asistente experto. Usa el siguiente CONTEXTO para responder.
+        sys_msg = f"""Eres un Chef experto y asistente culinario amable.
         
-        REGLAS VISUALES:
-        1. Títulos: **NEGRITA**.
-        2. Ingredientes: Lista con guiones (-).
-        3. Direcciones: Usa bloque de cita (>).
-        
-        CONTEXTO:
+        INFORMACIÓN RECUPERADA: 
         {context}
+        
+        INSTRUCCIONES DE FORMATO (MANDATORIO):
+        1. Usa '### ' para los títulos de recetas.
+        2. Usa '**' para negritas (ej: **Ingredientes:**).
+        3. Para los ingredientes, usa SIEMPRE una lista con guiones '- '.
+        4. Para la preparación, usa SIEMPRE una lista numerada '1. '.
+        5. No uses bloques de código, solo texto plano con formato Markdown.
+        
+        Ejemplo de salida esperada:
+        ### Nombre de la Receta
+        **Ingredientes:**
+        - 100g de harina
+        - 2 huevos
+        
+        **Preparación:**
+        1. Batir los huevos.
+        2. Mezclar con harina.
         """
     else:
-        system_instruction = f"""Eres un asistente amable del restaurante.
-        No encontraste información exacta.
-        
-        TEMAS DISPONIBLES:
-        - Recetas: {", ".join(RECIPE_LIST)}
-        - Direcciones.
-        
-        Di que no entendiste bien y sugiere ver las recetas."""
+        sys_msg = """No encontraste información exacta. Indica cortésmente que solo tienes información sobre: Paella, Mojito, Tarta de Manzana y Guacamole."""
 
-    prompt = f"<|im_start|>system\n{system_instruction}<|im_end|>\n<|im_start|>user\n{user_msg}<|im_end|>\n<|im_start|>assistant\n"
+    prompt = f"<|im_start|>system\n{sys_msg}<|im_end|>\n<|im_start|>user\n{user_msg}<|im_end|>\n<|im_start|>assistant\n"
 
     try:
         output = LLM(prompt, max_tokens=300, stop=["<|im_end|>"], echo=False, temperature=0.3)
