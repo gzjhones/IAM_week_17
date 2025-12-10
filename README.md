@@ -39,5 +39,19 @@ Utilizamos Python 3.9 para asegurar compatibilidad con las librerías de `llama-
 conda create -n chatbot_llm python=3.9
 conda activate chatbot_llm
 conda install jupyter  
-pip install flask flask-cors nltk scikit-learn numpy
-pip install rapidfuzz
+pip install flask flask-cors nltk scikit-learn numpy rapidfuzz llama-cpp-python
+
+mkdir models
+
+/tu-proyecto
+│
+├── models/
+│   └── qwen2.5-1.5b-instruct-q4_k_m.gguf
+│
+├── knowledge_base/
+│   ├── documento1.txt
+│   └── documento2.txt
+│
+├── app.py
+
+python app.py
