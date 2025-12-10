@@ -16,13 +16,13 @@ from rapidfuzz import process, fuzz
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configuración NLTK
+# NLTK Configuration
 nltk.download('stopwords'); nltk.download('punkt'); nltk.download('punkt_tab')
 stemmer = SnowballStemmer('spanish')
 stop_words = stopwords.words('spanish')
 
 # ==========================================
-# 1. CONFIGURACIÓN DEL LEXICÓN Y MODELO
+# 1. LEXICON AND MODEL CONFIGURATION
 # ==========================================
 KEYWORD_MAP = {
     "donde": "direccion",
@@ -39,7 +39,7 @@ KEYWORD_MAP = {
     "carta": "recetas"
 }
 
-print("--- CARGANDO CEREBRO ---")
+print("--- LOADING BRAIN ---")
 LLM = Llama(
     model_path="./models/qwen2.5-1.5b-instruct-q4_k_m.gguf",
     n_ctx=1024,
@@ -48,134 +48,140 @@ LLM = Llama(
 )
 
 # ==========================================
-# 2. GESTIÓN DE DOCUMENTOS
+# 2. DOCUMENT MANAGEMENT
 # ==========================================
-BASE_CONOCIMIENTO = []
-LISTA_TITULOS = []
+KNOWLEDGE_BASE = []
+RECIPE_LIST = []
 
-def limpiar_texto(texto):
-    texto = texto.lower()
-    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-    return texto
+def clean_text(text):
+    """Normalize text: lowercase and remove accents"""
+    text = text.lower()
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+    return text
 
-def cargar_documentos():
-    global BASE_CONOCIMIENTO, LISTA_TITULOS
-    BASE_CONOCIMIENTO = []
-    LISTA_TITULOS = []
+def load_documents():
+    """Load and index all documents from docs/ directory"""
+    global KNOWLEDGE_BASE, RECIPE_LIST
+    KNOWLEDGE_BASE = []
+    RECIPE_LIST = []
     
     files = glob.glob(os.path.join('docs', '*.txt'))
-    print("\n--- INDEXANDO DOCUMENTOS ---")
+    print("\n--- INDEXING DOCUMENTS ---")
     for filename in files:
         with open(filename, 'r', encoding='utf-8') as f:
             content = f.read()
             chunks = content.split('\n\n')
             for chunk in chunks:
                 if len(chunk.strip()) > 10:
-                    BASE_CONOCIMIENTO.append(chunk.strip())
+                    KNOWLEDGE_BASE.append(chunk.strip())
                     lines = chunk.split('\n')
                     for line in lines:
                         if "TITULO:" in line.upper():
-                            titulo = line.split(":")[1].strip()
-                            LISTA_TITULOS.append(titulo)
+                            title = line.split(":")[1].strip()
+                            RECIPE_LIST.append(title)
                             
-    print(f"--- SISTEMA LISTO: {len(BASE_CONOCIMIENTO)} bloques | {len(LISTA_TITULOS)} recetas ---")
+    print(f"--- SYSTEM READY: {len(KNOWLEDGE_BASE)} chunks | {len(RECIPE_LIST)} recipes ---")
 
-cargar_documentos()
+load_documents()
 
 # ==========================================
-# 3. LÓGICA DE CORRECCIÓN (RAPIDFUZZ)
+# 3. CORRECTION LOGIC (RAPIDFUZZ)
 # ==========================================
-def inyectar_correcciones(consulta):
+def inject_corrections(query):
     """
-    Usa Lógica Difusa para arreglar typos antes de la búsqueda.
-    Ejemplo: 'paeya' -> detecta 'Paella Valenciana' -> inyecta 'Paella'
+    Uses Fuzzy Logic to fix typos before search.
+    Example: 'paeya' -> detects 'Paella Valenciana' -> injects 'Paella'
     """
-    consulta_limpia = limpiar_texto(consulta)
-    palabras = consulta_limpia.split()
-    palabras_expandidas = words = palabras.copy()
+    clean_query = clean_text(query)
+    words = clean_query.split()
+    expanded_words = words.copy()
     
-    # A. Corregir Intenciones (Keyword Map)
-    # Si escribe 'direksion', busca en las claves del mapa (donde, ubicacion, etc)
-    # y si no encuentra, busca en los valores (direccion, precio).
-    vocabularios = list(KEYWORD_MAP.keys()) + list(set(KEYWORD_MAP.values()))
+    # A. Correct Intentions (Keyword Map)
+    # If user writes 'direksion', search in map keys (donde, ubicacion, etc)
+    # and if not found, search in values (direccion, precio).
+    vocabulary = list(KEYWORD_MAP.keys()) + list(set(KEYWORD_MAP.values()))
     
-    for palabra in palabras:
-        # Busca si la palabra se parece a algo de nuestro vocabulario clave
-        match = process.extractOne(palabra, vocabularios, scorer=fuzz.ratio, score_cutoff=85)
+    for word in words:
+        # Check if word resembles something from our key vocabulary
+        match = process.extractOne(word, vocabulary, scorer=fuzz.ratio, score_cutoff=85)
         if match:
-            palabra_corregida = match[0]
-            # Si la corrección es una clave (ej: "ubicacion"), obtenemos su valor canónico ("direccion")
-            termino_final = KEYWORD_MAP.get(palabra_corregida, palabra_corregida)
-            if termino_final not in palabras_expandidas:
-                palabras_expandidas.append(termino_final)
-                print(f"[RapidFuzz] Typo detectado: '{palabra}' -> Corregido a: '{termino_final}'")
+            corrected_word = match[0]
+            # If correction is a key (e.g., "ubicacion"), get its canonical value ("direccion")
+            final_term = KEYWORD_MAP.get(corrected_word, corrected_word)
+            if final_term not in expanded_words:
+                expanded_words.append(final_term)
+                print(f"[RapidFuzz] Typo detected: '{word}' -> Corrected to: '{final_term}'")
 
-    # B. Corregir Nombres de Recetas (Títulos)
-    # Usamos partial_token_sort_ratio para que "receta paeya" encuentre "PAELLA VALENCIANA"
-    if LISTA_TITULOS:
-        match_titulo = process.extractOne(
-            consulta_limpia, 
-            [limpiar_texto(t) for t in LISTA_TITULOS], 
+    # B. Correct Recipe Names (Titles)
+    # Use partial_token_sort_ratio so "receta paeya" finds "PAELLA VALENCIANA"
+    if RECIPE_LIST:
+        title_match = process.extractOne(
+            clean_query, 
+            [clean_text(t) for t in RECIPE_LIST], 
             scorer=fuzz.partial_token_sort_ratio, 
             score_cutoff=80
         )
         
-        if match_titulo:
-            # match_titulo[0] es el texto del título limpio que hizo match
-            # Lo agregamos a la búsqueda para asegurar que TF-IDF lo encuentre
-            print(f"[RapidFuzz] Posible receta detectada: '{match_titulo[0]}' ({match_titulo[1]:.1f}%)")
-            palabras_expandidas.append(match_titulo[0])
+        if title_match:
+            # title_match[0] is the cleaned title text that matched
+            # Add it to search to ensure TF-IDF finds it
+            print(f"[RapidFuzz] Possible recipe detected: '{title_match[0]}' ({title_match[1]:.1f}%)")
+            expanded_words.append(title_match[0])
 
-    return " ".join(palabras_expandidas)
+    return " ".join(expanded_words)
 
 # ==========================================
-# 4. MOTOR DE BÚSQUEDA
+# 4. SEARCH ENGINE
 # ==========================================
-def preprocesar_busqueda(texto):
-    # Paso 1: Limpieza básica
-    texto_limpio = limpiar_texto(texto)
-    # Paso 2: Tokenización
-    tokens = nltk.word_tokenize(texto_limpio, language='spanish')
-    tokens_stem = [stemmer.stem(t) for t in tokens if t.isalnum() and t not in stop_words]
-    return " ".join(tokens_stem)
+def preprocess_search(text):
+    """Preprocess text for TF-IDF: clean, tokenize, stem, remove stopwords"""
+    # Step 1: Basic cleaning
+    clean = clean_text(text)
+    # Step 2: Tokenization
+    tokens = nltk.word_tokenize(clean, language='spanish')
+    stem_tokens = [stemmer.stem(t) for t in tokens if t.isalnum() and t not in stop_words]
+    return " ".join(stem_tokens)
 
-def buscar_contexto(consulta):
-    # 1. APLICAMOS RAPIDFUZZ AQUÍ
-    # Esto transforma "como se ase la paeya" en "como se ase la paeya paella valenciana"
-    consulta_optimizada = inyectar_correcciones(consulta)
+def search_context(query):
+    """
+    Search for relevant context in knowledge base using TF-IDF + RapidFuzz correction
+    """
+    # 1. APPLY RAPIDFUZZ HERE
+    # This transforms "como se ase la paeya" into "como se ase la paeya paella valenciana"
+    optimized_query = inject_corrections(query)
     
-    corpus_limpio = [limpiar_texto(doc) for doc in BASE_CONOCIMIENTO]
-    # Usamos la consulta optimizada para la vectorización
-    corpus_para_vectorizar = corpus_limpio + [consulta_optimizada]
+    clean_corpus = [clean_text(doc) for doc in KNOWLEDGE_BASE]
+    # Use optimized query for vectorization
+    corpus_to_vectorize = clean_corpus + [optimized_query]
     
-    vectorizer = TfidfVectorizer(preprocessor=preprocesar_busqueda)
+    vectorizer = TfidfVectorizer(preprocessor=preprocess_search)
     try:
-        tfidf = vectorizer.fit_transform(corpus_para_vectorizar)
+        tfidf = vectorizer.fit_transform(corpus_to_vectorize)
         cosine = cosine_similarity(tfidf[-1], tfidf[:-1])
         idx = np.argmax(cosine)
         score = cosine[0][idx]
         
-        print(f"[TF-IDF] Consulta Original: '{consulta}' | Optimizada: '{consulta_optimizada}'")
+        print(f"[TF-IDF] Original Query: '{query}' | Optimized: '{optimized_query}'")
         print(f"[TF-IDF] Match Index: {idx} | Score: {score:.4f}")
         
-        if score > 0.1: # Subimos un poco el umbral ya que ahora "ayudamos" al motor
-            return BASE_CONOCIMIENTO[idx]
+        if score > 0.1:  # Slightly higher threshold since we're helping the engine
+            return KNOWLEDGE_BASE[idx]
     except Exception as e:
-        print(f"Error en búsqueda vectorizada: {e}")
+        print(f"Error in vectorized search: {e}")
         
     return None
 
 # ==========================================
-# 5. ENDPOINT CHAT
+# 5. CHAT ENDPOINT
 # ==========================================
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
     user_msg = data.get('message', '')
     
-    contexto = buscar_contexto(user_msg)
+    context = search_context(user_msg)
     
-    if contexto:
+    if context:
         system_instruction = f"""Eres un asistente experto. Usa el siguiente CONTEXTO para responder.
         
         REGLAS VISUALES:
@@ -184,14 +190,14 @@ def chat():
         3. Direcciones: Usa bloque de cita (>).
         
         CONTEXTO:
-        {contexto}
+        {context}
         """
     else:
         system_instruction = f"""Eres un asistente amable del restaurante.
         No encontraste información exacta.
         
         TEMAS DISPONIBLES:
-        - Recetas: {", ".join(LISTA_TITULOS)}
+        - Recetas: {", ".join(RECIPE_LIST)}
         - Direcciones.
         
         Di que no entendiste bien y sugiere ver las recetas."""
@@ -200,13 +206,13 @@ def chat():
 
     try:
         output = LLM(prompt, max_tokens=300, stop=["<|im_end|>"], echo=False, temperature=0.3)
-        respuesta = output['choices'][0]['text'].strip()
+        response = output['choices'][0]['text'].strip()
     except Exception as e:
-        respuesta = "Error técnico en el cerebro local."
-        print(f"Error LLM: {e}")
+        response = "Error técnico en el cerebro local."
+        print(f"LLM Error: {e}")
 
-    return jsonify({"response": respuesta})
+    return jsonify({"response": response})
 
 if __name__ == '__main__':
-    print("--- Servidor LLM Iniciado ---")
+    print("--- LLM Server Started ---")
     app.run(port=5000, debug=True)
